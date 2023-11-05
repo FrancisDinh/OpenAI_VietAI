@@ -82,3 +82,56 @@ def get_doc_pages(pdf_reader, pages):
             pdf_reader.pages[page].extract_text()
         docs.append(Document(page_content=text))
     return docs
+
+
+def is_yes_no(answer):
+    question_full = f"""
+    Does the answer contain a positive word, such as: yes, yeah, go ahead, approval? Answer only True or False 
+    
+    ###
+    Answer: {answer}
+    """
+    return answer_default(question_full)
+
+
+def is_same_page(question):
+    question_full = f"""
+    Does the question contain 'the same page' or in the 'current context' or anything similar? Answer only True or False
+    Example: 
+    what is a loss function, using the same page => Return True
+    Can you look for the answer to what is a neural network in page 1, 2 and also 3 => Return False
+    
+    ###
+    Question: {question}
+    """
+    return answer_default(question_full)
+
+
+def has_page_numbers(question):
+    question_full = f"""
+    Does the below input contain page numbers? If yes, which page, answer as a list of integer. If not, return an empty list 
+    
+    ###
+    Question: {question}
+    """
+    return answer_default(question_full)
+
+
+def extract_core_question(question):
+    question_full = f"""
+    what is the most important part of the question?  Remove context such as: page number and same page.
+    
+    ###
+    Question: {question}
+    """
+    return answer_default(question_full)
+
+
+def is_question(text):
+    question_full = f"""
+    Is this input a question or not? Answer only True or False
+    
+    ###
+    Input: {text}
+    """
+    return answer_default(question_full)

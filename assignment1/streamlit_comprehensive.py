@@ -4,7 +4,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time
-from RAGBot_functions import create_qa_chain, answer_default, answer_from_doc, answer_idk_ext_context
+from RAGBot_functions import create_qa_chain, answer_default, answer_from_doc, answer_idk_ext_context, \
+    is_yes_no, is_same_page, has_page_numbers, is_request, extract_core_request, get_last_question, \
+    answer_what_else
 from utils import read_pdf, process_docs, get_pdf_len, search_doc_from_knowledge_base, \
     str_to_list, get_doc_pages
 
@@ -64,7 +66,7 @@ temperature = st.sidebar.slider(
 max_tokens = st.sidebar.slider(
     "Max Token",
     min_value=10,
-    max_value=4095,
+    max_value=500,
     value=100,
     step=10,
     key="max_tokens",
@@ -125,9 +127,12 @@ if prompt := st.chat_input("Eyyo, What's up?"):
 
     with st.chat_message("assistant"):
         # TODO: add more constrains on selection
+        # Add flag to mark at the chat history
+        answer_external = False
 
         if "knowledge_base" not in st.session_state:
             response = "Eyyo, import your PDF."
+
         # Fragment the previous 4 functions down
         # Priority:
         # page_numbers
@@ -135,42 +140,78 @@ if prompt := st.chat_input("Eyyo, What's up?"):
         # external
         # Case1: answer from doc
         else:
-            if not external and not same_page and not page_numbers:
-                doc = search_doc_from_knowledge_base(
-                    st.session_state.knowledge_base, prompt, threshold=0.8)
-                if doc:
+            if page_numbers or external or same_page:
+                if page_numbers:
+                    doc = get_doc_pages(
+                        st.session_state.pdf_reader, page_numbers)
                     st.session_state.doc = doc
                     response = answer_from_doc(
                         chain, st.session_state.doc, prompt)
-                else:
-                    response = answer_idk_ext_context()
 
-            elif page_numbers:
-                doc = get_doc_pages(st.session_state.pdf_reader, page_numbers)
-                st.session_state.doc = doc
-                response = answer_from_doc(
-                    chain, st.session_state.doc, prompt)
+                elif same_page:
+                    if not st.session_state.doc:
+                        # TOTO: block this state at the beginning of chat, freeze the tickbox
+                        response = "Eyyo, you dont have any doc."
+                    else:
+                        response = answer_from_doc(
+                            chain, st.session_state.doc, prompt)
 
-            elif same_page:
-                if not st.session_state.doc:
-                    # TOTO: block this state at the beginning of chat, freeze the tickbox
-                    response = "Eyyo, you dont have any doc."
-                else:
-                    response = answer_from_doc(
-                        chain, st.session_state.doc, prompt)
+                elif external:
+                    # Low threshold to trigger external search easier, closer to the context of the question
+                    doc = search_doc_from_knowledge_base(
+                        st.session_state.knowledge_base, prompt, threshold=0.4)
+                    if doc:
+                        st.session_state.doc = doc
+                        response = answer_from_doc(
+                            chain, st.session_state.knowledge_base, prompt)
+                    else:
+                        st.session_state.doc = None
+                        response = "External" + answer_default(
+                            prompt, model_name=model_name, max_tokens=max_tokens, temperature=temperature)
+                        answer_external = True
 
-            elif external:
-                # Low threshold to trigger external search easier, closer to the context of the question
-                doc = search_doc_from_knowledge_base(
-                    st.session_state.knowledge_base, prompt, threshold=0.4)
-                if doc:
-                    st.session_state.doc = doc
-                    response = answer_from_doc(
-                        chain, st.session_state.knowledge_base, prompt)
+            elif not external and not same_page and not page_numbers:
+                is_request = is_request(prompt)
+                # If input is a question
+                if is_request:
+                    # check same_page, check page_number, check external
+                    # is_same_page = is_same_page(prompt)
+                    page_numbers = has_page_numbers(prompt)
+
+                    core_question = extract_core_request(prompt)
+                    # st.sidebar.write(f"Core question: {core_question}")
+                    # extract page numbers and input only core question
+                    if has_page_numbers:
+                        doc = get_doc_pages(
+                            st.session_state.pdf_reader, page_numbers)
+                        st.session_state.doc = doc
+                        response = answer_from_doc(
+                            chain, st.session_state.doc, core_question)
+                    else:
+                        # answer normally
+                        doc = search_doc_from_knowledge_base(
+                            st.session_state.knowledge_base, core_question, threshold=0.5)
+                        if doc:
+                            st.session_state.doc = doc
+                            response = answer_from_doc(
+                                chain, st.session_state.doc, core_question)
+                        else:
+                            response = answer_idk_ext_context()
+                # if input is a yes or no response of user
                 else:
-                    st.session_state.doc = None
-                    response = "Reponse using external knowledge\n\n" + \
-                        answer_default(prompt)
+                    is_yes_no = is_yes_no(prompt)
+                    # If user agree to proceed with external source
+                    if is_yes_no:
+                        # proceed with external source
+                        last_question = get_last_question(
+                            st.session_state.messages)
+                        st.session_state.doc = None
+                        response = "External" + answer_default(
+                            last_question, model_name, max_tokens=max_tokens, temperature=temperature)
+                        answer_external = True
+                    else:
+                        # i dont know
+                        response = answer_what_else()
 
         # Create replying effect
         message_placeholder = st.empty()
@@ -180,5 +221,8 @@ if prompt := st.chat_input("Eyyo, What's up?"):
             message_placeholder.markdown(full_response + "▌")
         message_placeholder.markdown(full_response)
 
+    # print page number
+    # st.sidebar.write()
+
     st.session_state.messages.append(
-        {"role": "assistant", "content": response})
+        {"role": "assistant", "content": response, "external": answer_external})
