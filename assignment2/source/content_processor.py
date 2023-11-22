@@ -1,15 +1,17 @@
-from PyPDF2 import PdfReader
 from langchain.text_splitter import MarkdownTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain import FAISS
-from langchain.docstore.document import Document
+from langchain.document_loaders import DirectoryLoader
+import os
+import glob
+import openai
 
 class Knowledge_base():
-    def __init__(self, knowledge_base, threshold=0.5):
+    def __init__(self, knowledge_base, threshold=0.8):
         self.threshold=threshold
         self.knowledge_base = knowledge_base
     
-    def search_doc_from_knowledge_base(self,knowledge_base, question):
+    def search_from_knowledge_base(self, question):
         # Return the closet doc to question
         docs = self.knowledge_base.similarity_search_with_score(question)
         closest_doc = self._get_closet_doc_from_docs(docs)
@@ -28,7 +30,7 @@ class Knowledge_base():
             if min_score > score:
                 min_id = id
                 min_score = score
-        if min_score < threshold:
+        if min_score < self.threshold:
             return docs[min_id][0]  # return doc
         else:
             return None
@@ -36,7 +38,7 @@ class Knowledge_base():
 class Text_processor():
     def __init__(self, folder_path, chunk_size=256, chunk_overlap=20):
         self.folder_path = folder_path
-        self.folder_list = self._get_recursive_folder()
+        self.folder_list = self._get_rescursive_folder()
         self.doc_list = self._get_doc_path()
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -45,15 +47,19 @@ class Text_processor():
         self.knowledge_base=None
     
     def _get_rescursive_folder(self):
-        for folder in glob.iglob(f"../{self.folder_path}/**"):
-            self.folder_list.append(folder)
+        folder_list = []
+        for folder in glob.iglob(f"{self.folder_path}/**"):
+            folder_list.append(folder)
+        return folder_list
     
     def _get_doc_path(self):
-        for filename in glob.iglob(f'../{self.folder_path}/**/*.md', recursive=True):
-            self.doc_list.append(filename)
+        doc_list = []
+        for filename in glob.iglob(f'{self.folder_path}/**/*.md', recursive=True):
+            doc_list.append(filename)
+        return doc_list
     
     def _load_docs(self):
-        loader = DirectoryLoader(self.dir_path)
+        loader = DirectoryLoader(self.folder_path)
         data = loader.load()
         return data
         
@@ -74,11 +80,11 @@ class Text_processor():
         self.upf_splits = self._split_docs()
         
         # Filter chunks shorter than 1 sentence or 10 words
-        self.upf_splits = self._filter_chunk(self)
+        self.upf_splits = self._filter_chunk()
         
         # Embed chunks
-        self.knowledge_base = FAISS.from_texts(documents=self.upf_splits, embedding=self.embeddings)
-        return Knowledge_base(self.knowledge_base)
+        self.knowledge_base = Knowledge_base(FAISS.from_documents(documents=self.upf_splits, embedding=self.embeddings))
+        return self.knowledge_base
 
     def _filter_chunk(self):
         filtered_upf_splits = []
@@ -95,8 +101,8 @@ class Text_processor():
         return len(self.doc_list)
 
     def save_knowledge_base(self, output_path):
-        self.knowledge_base.save_local(output_path)
+        self.knowledge_base.knowledge_base.save_local(output_path)
     
     def load_knowledge_base(self, input_path):
-        self.knowledge_base.load_local(input_path, self.embeddings)
-        return Knowledge_base(self.knowledge_base)
+        self.knowledge_base = Knowledge_base(FAISS.load_local(input_path, self.embeddings))
+        return self.knowledge_base
