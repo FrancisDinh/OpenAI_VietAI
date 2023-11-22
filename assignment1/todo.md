@@ -1,3 +1,10 @@
+# Front end
+
+- Load PDF
+- Help
+- Manual config
+- Edit previous question
+
 # Chat bot
 
 - Calculate number of token, cost of query
